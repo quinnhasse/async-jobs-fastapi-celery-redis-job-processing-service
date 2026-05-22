@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Job, JobState
 from app.schemas import JobCreate, JobResponse, JobSubmitResponse
+from app.worker.tasks import process_job
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -39,9 +40,6 @@ def submit_job(
     db.add(job)
     db.commit()
     db.refresh(job)
-
-    # Dispatch to Celery — import here to allow easy test patching
-    from app.worker.tasks import process_job
 
     process_job.delay(job.id)
 

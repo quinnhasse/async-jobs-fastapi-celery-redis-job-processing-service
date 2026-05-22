@@ -37,6 +37,42 @@ class JobTask(Task):
         log.error("task %s failed permanently: %s", task_id, exc)
 
 
+def run_job(db: Session, job_id: str, retries: int = 0) -> dict:
+    """Core job execution logic — shared by the Celery task and tests.
+
+    Transitions job from queued/running → running, executes the payload,
+    then transitions to done on success. Raises on failure so the caller
+    (the Celery task) can retry or mark failed.
+    """
+    job = db.get(Job, job_id)
+    if job is None:
+        log.error("job %s not found — skipping", job_id)
+        return {"status": "not_found"}
+
+    # Transition to running only from queued (or re-queued on retry)
+    if job.state in (JobState.queued, JobState.running):
+        try:
+            job.transition_to(JobState.running)
+        except ValueError:
+            pass  # already running from a previous attempt in this task
+        job.retry_count = retries
+        db.commit()
+    else:
+        log.warning("job %s in unexpected state %r — skipping", job_id, job.state)
+        return {"status": "skipped", "state": job.state}
+
+    # --- Payload operation ---
+    payload = job.payload or {}
+    _execute_payload(payload)
+    # -------------------------
+
+    job.transition_to(JobState.done)
+    job.result = {"processed": True, "payload": payload}
+    db.commit()
+    log.info("job %s completed", job_id)
+    return {"job_id": job_id, "state": "done"}
+
+
 @celery_app.task(
     bind=True,
     base=JobTask,
@@ -49,54 +85,17 @@ class JobTask(Task):
     retry_jitter=True,
 )
 def process_job(self: Task, job_id: str) -> dict:
-    """Execute the work for a queued job.
-
-    - Transitions job from queued → running at start.
-    - Runs the payload operation (simulated with a configurable delay).
-    - On success: transitions running → done and stores the result.
-    - On failure after max retries: transitions to failed and stores the error.
-    """
+    """Celery task wrapper for run_job."""
     db: Session = _get_db_session()
     try:
-        job = db.get(Job, job_id)
-        if job is None:
-            log.error("job %s not found — skipping", job_id)
-            return {"status": "not_found"}
-
-        # Transition to running only from queued (or re-queued on retry)
-        if job.state in (JobState.queued, JobState.running):
-            try:
-                job.transition_to(JobState.running)
-            except ValueError:
-                pass  # already running from a previous attempt in this task
-            job.retry_count = self.request.retries
-            db.commit()
-        else:
-            log.warning("job %s in unexpected state %r — skipping", job_id, job.state)
-            return {"status": "skipped", "state": job.state}
-
-        # --- Payload operation ---
-        payload = job.payload or {}
-        _execute_payload(payload)
-        # -------------------------
-
-        job.transition_to(JobState.done)
-        job.result = {"processed": True, "payload": payload}
-        db.commit()
-        log.info("job %s completed", job_id)
-        return {"job_id": job_id, "state": "done"}
-
+        return run_job(db, job_id, retries=self.request.retries)
     except MaxRetriesExceededError:
-        # Celery calls this after the last retry; set terminal failed state.
         _mark_failed(db, job_id, "max retries exceeded")
         return {"job_id": job_id, "state": "failed"}
-
     except Exception as exc:
-        # Non-terminal: update retry count, then let Celery retry.
         _refresh_retry_count(db, job_id, self.request.retries)
         log.warning("job %s attempt %d failed: %s", job_id, self.request.retries, exc)
         raise
-
     finally:
         db.close()
 
@@ -115,11 +114,12 @@ def _execute_payload(payload: dict) -> None:
 
 
 def _mark_failed(db: Session, job_id: str, reason: str) -> None:
+    """Unconditionally set a job to failed state and store the error."""
     job = db.get(Job, job_id)
     if job is None:
         return
     try:
-        job.state = JobState.failed  # force — may already be running
+        job.state = JobState.failed
         job.error = reason
         db.commit()
     except Exception:
@@ -128,6 +128,7 @@ def _mark_failed(db: Session, job_id: str, reason: str) -> None:
 
 
 def _refresh_retry_count(db: Session, job_id: str, attempt: int) -> None:
+    """Update the retry_count on a job record."""
     job = db.get(Job, job_id)
     if job is None:
         return
