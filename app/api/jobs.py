@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.metrics import jobs_queued
 from app.models import Job, JobState
 from app.schemas import JobCreate, JobResponse, JobSubmitResponse
 from app.worker.tasks import process_job
@@ -42,6 +43,7 @@ def submit_job(
     db.refresh(job)
 
     process_job.delay(job.id)
+    jobs_queued.inc()
 
     return JobSubmitResponse(id=job.id, state=job.state, created=True)
 

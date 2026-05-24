@@ -9,6 +9,7 @@ from app.api.health import router as health_router
 from app.api.jobs import router as jobs_router
 from app.api.stream import router as stream_router
 from app.logging_config import RequestLoggingMiddleware, configure_logging
+from app.metrics import router as metrics_router
 
 log = structlog.get_logger()
 
@@ -33,3 +34,4 @@ app.add_middleware(RequestLoggingMiddleware)
 app.include_router(health_router)
 app.include_router(jobs_router)
 app.include_router(stream_router)
+app.include_router(metrics_router)

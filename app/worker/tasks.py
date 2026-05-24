@@ -15,6 +15,7 @@ from celery.exceptions import MaxRetriesExceededError
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.metrics import jobs_completed, jobs_failed, jobs_retried, task_duration
 from app.models import Job, JobState
 from app.worker.celery_app import celery_app
 
@@ -63,12 +64,14 @@ def run_job(db: Session, job_id: str, retries: int = 0) -> dict:
 
     # --- Payload operation ---
     payload = job.payload or {}
-    _execute_payload(payload)
+    with task_duration.time():
+        _execute_payload(payload)
     # -------------------------
 
     job.transition_to(JobState.done)
     job.result = {"processed": True, "payload": payload}
     db.commit()
+    jobs_completed.inc()
     log.info("job %s completed", job_id)
     return {"job_id": job_id, "state": "done"}
 
@@ -94,6 +97,7 @@ def process_job(self: Task, job_id: str) -> dict:
         return {"job_id": job_id, "state": "failed"}
     except Exception as exc:
         _refresh_retry_count(db, job_id, self.request.retries)
+        jobs_retried.inc()
         log.warning("job %s attempt %d failed: %s", job_id, self.request.retries, exc)
         raise
     finally:
@@ -124,6 +128,7 @@ def _mark_failed(db: Session, job_id: str, reason: str) -> None:
         db.commit()
     except Exception:
         db.rollback()
+    jobs_failed.inc()
     log.error("job %s marked failed: %s", job_id, reason)
 
 
