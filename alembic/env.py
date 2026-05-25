@@ -1,8 +1,9 @@
 import os
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import engine_from_config, pool
+
+from alembic import context
 
 # Import models so Alembic sees the metadata
 from app.database import Base  # noqa: F401

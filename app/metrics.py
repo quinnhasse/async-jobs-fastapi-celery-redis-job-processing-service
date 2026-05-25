@@ -11,9 +11,9 @@ Import ``record_*`` helpers from worker/task code. The ``/metrics`` endpoint
 is registered in app/main.py.
 """
 
-from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 from fastapi import APIRouter
 from fastapi.responses import Response
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 
 router = APIRouter(tags=["metrics"])
 

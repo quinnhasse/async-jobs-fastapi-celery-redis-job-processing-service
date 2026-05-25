@@ -5,7 +5,7 @@ bypassing Celery's broker entirely.
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import create_engine
@@ -47,8 +47,8 @@ def _insert_job(session, state=JobState.queued, payload=None) -> Job:
         state=state,
         retry_count=0,
         payload=payload or {},
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
     session.add(job)
     session.commit()

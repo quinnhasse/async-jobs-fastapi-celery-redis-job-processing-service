@@ -7,7 +7,7 @@ Covers:
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -20,8 +20,8 @@ def _make_job(**kwargs) -> Job:
         "state": JobState.queued,
         "payload": {},
         "retry_count": 0,
-        "created_at": datetime.now(timezone.utc),
-        "updated_at": datetime.now(timezone.utc),
+        "created_at": datetime.now(UTC),
+        "updated_at": datetime.now(UTC),
     }
     defaults.update(kwargs)
     return Job(**defaults)
